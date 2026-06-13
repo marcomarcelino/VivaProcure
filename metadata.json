@@ -1,0 +1,6 @@
+{
+  "name": "VivaProcure",
+  "description": "Empowering sustainable agriculture through data-driven procurement and cooperative management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
