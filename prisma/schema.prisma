@@ -1,0 +1,104 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Cooperative {
+  id       String @id @default(uuid())
+  name     String
+  location String
+  users    User[]
+}
+
+model User {
+  id            String       @id @default(uuid())
+  cooperativeId String?      @map("cooperative_id")
+  cooperative   Cooperative? @relation(fields: [cooperativeId], references: [id])
+  name          String
+  email         String       @unique
+  password      String
+  role          String       // "super_admin" | "cooperative_admin" | "supplier"
+  status        String       // "aktif" | "nonaktif" or similar
+  avatar        String?      // Optional for profile rendering compatibility
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  sender    String   // "ai" or "user"
+  text      String
+  timestamp DateTime @default(now())
+  tableData Json?    // Array of objects/headers for tables
+  insight   String?
+  chips     Json?    // Array of chips
+}
+
+model StockItem {
+  id          String @id @default(uuid())
+  name        String
+  sku         String @unique
+  cooperative String
+  stock       Float
+  unit        String
+  threshold   Float
+  capacityMax Float
+  status      String // "KRITIS" | "SELESAI" | "PERINGATAN"
+}
+
+model StockLog {
+  id          String   @id @default(uuid())
+  type        String   // "masuk" | "keluar" | "penyesuaian"
+  title       String
+  description String
+  amount      String
+  color       String
+  date        String
+}
+
+model SupplierHealth {
+  code       String @id
+  name       String
+  product    String
+  percentage Float
+  status     String // "SANGAT BAIK" | "WASPADA" | "BAIK"
+}
+
+model SmartContract {
+  id               String @id
+  title            String
+  commodity        String
+  quantity         String
+  price            String
+  totalValue       String
+  firstParty       String
+  firstPartyTitle  String
+  secondParty      String
+  secondPartyTitle String
+  hash             String
+  signedAt         String
+  deliveryMethod   String
+  documentText     String
+}
+
+model Order {
+  id              String @id
+  contractId      String
+  supplierName    String
+  commodity       String
+  quantity        String
+  totalValue      String
+  currentStatus   String // "dikemas" | "dikirim" | "sampai" | "diterima"
+  courierName     String
+  courierPhone    String
+  lastPositionGPS String
+  lastCheckedTime String
+  timeline        Json   // Timeline steps [{ status: string, title: string, description: string, timestamp: string, isActive: boolean, isCompleted: boolean }]
+  rating          Int?
+  ratingDetails   Json?  // { timeliness: number, quality: number, service: number }
+  reviewComment   String?
+  createdAt       String
+  allocation      Json?  // Allocation per cooperative, e.g. { "Sumber Makmur": 120, "Padiwangi": 80 }
+}

@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TRANSLATIONS } from '../data';
-import { Order, OrderTrackingStep } from '../types';
+import { Order, OrderTrackingStep, User } from '../types';
 
 interface OrderTrackingScreenProps {
   lang: 'id' | 'en';
   orders: Order[];
   onUpdateOrderStatus: (orderId: string, status: 'dikemas' | 'dikirim' | 'sampai' | 'diterima', meta?: { rating?: number; ratingDetails?: any; reviewComment?: string }) => void;
   onRateSupplier: (supplierName: string, stars: number) => void;
+  user: User | null;
 }
 
-export default function OrderTrackingScreen({ lang, orders, onUpdateOrderStatus, onRateSupplier }: OrderTrackingScreenProps) {
+export default function OrderTrackingScreen({ lang, orders, onUpdateOrderStatus, onRateSupplier, user }: OrderTrackingScreenProps) {
   const [selectedOrderId, setSelectedOrderId] = useState<string>(orders[1]?.id || orders[0]?.id || '');
   const [filterTab, setFilterTab] = useState<'semua' | 'aktif' | 'selesai'>('semua');
   const [searchQuery, setSearchQuery] = useState('');
@@ -22,12 +23,68 @@ export default function OrderTrackingScreen({ lang, orders, onUpdateOrderStatus,
   const [serviceVal, setServiceVal] = useState(5);
   const [commentText, setCommentText] = useState('');
 
+  // Stock Database states
+  const [stockList, setStockList] = useState<any[]>([]);
+  const [selectedSku, setSelectedSku] = useState<string>('');
+  const [receivedQty, setReceivedQty] = useState<string>('');
+
   const t = TRANSLATIONS[lang];
 
   const selectedOrder = orders.find(o => o.id === selectedOrderId);
 
+  // Load stocks when modal opens to auto-populate SKU dropdown and prefill qty
+  useEffect(() => {
+    if (isRatingModalOpen) {
+      fetch('/api/stocks')
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.length > 0) {
+            setStockList(data);
+            
+            // Auto-match commodity with stock name to auto-select SKU
+            const matchedStock = data.find((item: any) => 
+              selectedOrder && (
+                item.name.toLowerCase().includes(selectedOrder.commodity.toLowerCase()) || 
+                selectedOrder.commodity.toLowerCase().includes(item.name.toLowerCase())
+              )
+            );
+            if (matchedStock) {
+              setSelectedSku(matchedStock.sku);
+            } else {
+              setSelectedSku(data[0].sku);
+            }
+          }
+        })
+        .catch(err => console.error("Error loading stocks for receiving:", err));
+
+      if (selectedOrder) {
+        const qtyMatch = selectedOrder.quantity.match(/^([\d.,]+)/);
+        if (qtyMatch) {
+          setReceivedQty(qtyMatch[1].replace(/,/g, ''));
+        } else {
+          setReceivedQty('');
+        }
+      }
+    }
+  }, [isRatingModalOpen, selectedOrder]);
+
   // Filter & Search orders
   const filteredOrders = orders.filter(order => {
+    // Role-based filtering
+    if (user) {
+      if (user.role === 'cooperative_admin') {
+        const coopName = user.cooperative || '';
+        const hasAllocation = order.allocation && Object.keys(order.allocation).some(k => 
+          k.toLowerCase().includes(coopName.toLowerCase()) || coopName.toLowerCase().includes(k.toLowerCase())
+        );
+        if (!hasAllocation) return false;
+      } else if (user.role === 'supplier') {
+        const isSupplier = order.supplierName.toLowerCase().includes(user.name.toLowerCase()) ||
+                           (user.name.toLowerCase().includes('herman') && order.supplierName.toLowerCase().includes('subur jaya'));
+        if (!isSupplier) return false;
+      }
+    }
+
     // search filter
     const matchesQuery = 
       order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -412,7 +469,7 @@ export default function OrderTrackingScreen({ lang, orders, onUpdateOrderStatus,
                   <div className="space-y-3">
                     
                     {/* Interactive Simulator Tools */}
-                    {selectedOrder.currentStatus !== 'diterima' && (
+                    {selectedOrder.currentStatus !== 'diterima' && user && (user.role === 'supplier' || user.role === 'super_admin') && (
                       <div className="bg-amber-50/50 border border-amber-200/60 rounded-xl p-3.5 space-y-2.5">
                         <span className="text-[9px] text-amber-700 bg-amber-100 font-mono font-black px-2 py-0.5 rounded uppercase tracking-wider block w-fit">
                           {lang === 'id' ? 'Simulasi Perjalanan (Fungsi Demo)' : 'Courier Simulation Controls'}
@@ -457,13 +514,23 @@ export default function OrderTrackingScreen({ lang, orders, onUpdateOrderStatus,
 
                     {/* Cooperative Main Receipt verification Trigger */}
                     {selectedOrder.currentStatus === 'sampai' ? (
-                      <button
-                        onClick={handleOpenRatingModal}
-                        className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-sm hover:shadow transition-all flex items-center justify-center gap-2 border-none outline-none cursor-pointer focus:outline-none"
-                      >
-                        <span className="material-symbols-outlined">gavel</span>
-                        {lang === 'id' ? 'Konfirmasi Penerimaan & Beri Rating' : 'Confirm Receipt & Complete Order'}
-                      </button>
+                      user && (user.role === 'cooperative_admin' || user.role === 'super_admin') ? (
+                        <button
+                          onClick={handleOpenRatingModal}
+                          className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-sm hover:shadow transition-all flex items-center justify-center gap-2 border-none outline-none cursor-pointer focus:outline-none"
+                        >
+                          <span className="material-symbols-outlined">gavel</span>
+                          {lang === 'id' ? 'Konfirmasi Penerimaan & Beri Rating' : 'Confirm Receipt & Complete Order'}
+                        </button>
+                      ) : (
+                        <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 flex items-center gap-3">
+                          <span className="material-symbols-outlined text-amber-500 text-[26px]">info</span>
+                          <div className="text-xs font-semibold">
+                            <p className="font-extrabold leading-snug">{lang === 'id' ? 'Pesanan Tiba di Tujuan' : 'Order Arrived at Destination'}</p>
+                            <p className="text-slate-500 mt-0.5">{lang === 'id' ? 'Menunggu Ketua Koperasi memverifikasi fisik barang dan merilis dana.' : 'Awaiting Cooperative Chairman to verify physical goods and complete order.'}</p>
+                          </div>
+                        </div>
+                      )
                     ) : selectedOrder.currentStatus === 'diterima' ? (
                       <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center gap-3 text-emerald-800">
                         <span className="material-symbols-outlined text-emerald-500 text-[26px]">task_alt</span>
@@ -590,6 +657,43 @@ export default function OrderTrackingScreen({ lang, orders, onUpdateOrderStatus,
                       ))}
                     </div>
                   </div>
+                </div>
+              </div>
+              {/* Warehouse Stock Receipt Integration */}
+              <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-gray-150">
+                <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-400 font-mono border-b border-gray-200 pb-1 flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px] text-emerald-600">inventory_2</span>
+                  {lang === 'id' ? 'Integrasi Stok Gudang Koperasi (Otomatis)' : 'Cooperative Stock Integration (Automatic)'}
+                </h4>
+                
+                <div className="text-xs text-[#0b1c30] space-y-2.5">
+                  <p className="font-semibold text-slate-500">
+                    {lang === 'id' 
+                      ? 'Stok berikut akan otomatis ditambahkan ke masing-masing koperasi saat pesanan diselesaikan:' 
+                      : 'The following stock volumes will be automatically posted to each cooperative upon receipt:'}
+                  </p>
+                  
+                  <div className="bg-white border border-gray-200 rounded-xl p-3.5 divide-y divide-gray-100 font-sans shadow-inner">
+                    {selectedOrder.allocation ? (
+                      Object.entries(selectedOrder.allocation).map(([coopName, qty]) => (
+                        <div key={coopName} className="flex justify-between py-2 first:pt-0 last:pb-0 font-semibold text-xs">
+                          <span className="text-slate-700">{coopName}</span>
+                          <span className="text-emerald-600 font-bold font-mono">+{qty} {selectedOrder.quantity.includes("Liter") ? "Liter" : "Ton"}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="flex justify-between py-2 first:pt-0 last:pb-0 font-semibold text-xs">
+                        <span className="text-slate-700">Koperasi Sumber Makmur</span>
+                        <span className="text-emerald-600 font-bold font-mono">+{selectedOrder.quantity}</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <p className="text-[10px] text-gray-400 italic">
+                    {lang === 'id'
+                      ? '*Sistem mendeteksi kecocokan item secara otomatis dan membuat log penerimaan tersertifikasi di database.'
+                      : '*The system automatically maps these adjustments and publishes certifiable receipt logs.'}
+                  </p>
                 </div>
               </div>
 

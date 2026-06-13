@@ -1,21 +1,41 @@
 import React, { useState } from 'react';
 import { TRANSLATIONS } from '../data';
-import { SmartContract } from '../types';
+import { SmartContract, User } from '../types';
 
 interface ContractsScreenProps {
   lang: 'id' | 'en';
   contracts: SmartContract[];
   onAddContract: (contract: SmartContract) => void;
+  user: User | null;
 }
 
-export default function ContractsScreen({ lang, contracts, onAddContract }: ContractsScreenProps) {
+export default function ContractsScreen({ lang, contracts, onAddContract, user }: ContractsScreenProps) {
   const [selectedContract, setSelectedContract] = useState<SmartContract | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   const t = TRANSLATIONS[lang];
 
-  // Filtering contracts based on search keyword
+  // Filtering contracts based on role and search keyword
   const filteredContracts = contracts.filter(contract => {
+    // Role-based filtering
+    if (user) {
+      if (user.role === 'cooperative_admin') {
+        const coopName = user.cooperative || '';
+        const isMatch = contract.firstParty.toLowerCase().includes(coopName.toLowerCase()) ||
+                        contract.firstPartyTitle.toLowerCase().includes(coopName.toLowerCase()) ||
+                        contract.secondParty.toLowerCase().includes(coopName.toLowerCase()) ||
+                        contract.secondPartyTitle.toLowerCase().includes(coopName.toLowerCase()) ||
+                        contract.title.toLowerCase().includes(coopName.toLowerCase()) ||
+                        contract.documentText.toLowerCase().includes(coopName.toLowerCase());
+        if (!isMatch) return false;
+      } else if (user.role === 'supplier') {
+        const isSupplierMatch = contract.secondParty.toLowerCase().includes(user.name.toLowerCase()) ||
+                               contract.secondPartyTitle.toLowerCase().includes(user.name.toLowerCase()) ||
+                               (user.name.toLowerCase().includes('herman') && contract.secondParty.toLowerCase().includes('subur jaya'));
+        if (!isSupplierMatch) return false;
+      }
+    }
+
     const query = searchQuery.toLowerCase();
     return (
       contract.id.toLowerCase().includes(query) ||

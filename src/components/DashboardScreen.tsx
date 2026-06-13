@@ -1,5 +1,5 @@
-import React from 'react';
-import { User, SupplierHealth, ProcurementLog } from '../types';
+import React, { useState, useEffect } from 'react';
+import { User, SupplierHealth, ProcurementLog, StockItem } from '../types';
 import { INITIAL_SUPPLIER_HEALTHS, INITIAL_PROCUREMENT_LOGS, TRANSLATIONS } from '../data';
 
 interface DashboardScreenProps {
@@ -11,6 +11,62 @@ interface DashboardScreenProps {
 
 export default function DashboardScreen({ user, lang, onNavigateToTab, supplierHealths }: DashboardScreenProps) {
   const t = TRANSLATIONS[lang];
+  const [stocks, setStocks] = useState<StockItem[]>([]);
+  const [aiRecommendations, setAiRecommendations] = useState<Record<string, { recommendedVolume: number, weatherSummary: string, reasoningId: string }>>({});
+
+  useEffect(() => {
+    fetch('/api/stocks')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.length > 0) setStocks(data);
+      })
+      .catch(err => console.error("Error loading dashboard stocks:", err));
+  }, []);
+
+  useEffect(() => {
+    if (stocks.length > 0) {
+      const lowItems = stocks.filter(item => {
+        if (user.role === 'cooperative_admin') {
+          const coopName = user.cooperative || '';
+          return (item.cooperative.toLowerCase().includes(coopName.toLowerCase()) || coopName.toLowerCase().includes(item.cooperative.toLowerCase())) && item.stock < 0.3 * item.capacityMax;
+        }
+        return item.stock < 0.3 * item.capacityMax;
+      });
+      
+      lowItems.forEach(item => {
+        fetch('/api/ai/forecast-recommendation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            currentStock: item.stock,
+            capacityMax: item.capacityMax,
+            threshold: item.threshold,
+            commodityName: item.name
+          })
+        })
+        .then(res => res.json())
+        .then(data => {
+          setAiRecommendations(prev => ({
+            ...prev,
+            [item.sku]: {
+              recommendedVolume: data.recommendedVolume,
+              weatherSummary: data.weatherSummary,
+              reasoningId: lang === 'id' ? data.reasoningId : data.reasoningEn
+            }
+          }));
+        })
+        .catch(err => console.error("Error fetching forecast recommendation for " + item.sku, err));
+      });
+    }
+  }, [stocks, lang, user]);
+
+  const lowStockItems = stocks.filter(item => {
+    if (user.role === 'cooperative_admin') {
+      const coopName = user.cooperative || '';
+      return (item.cooperative.toLowerCase().includes(coopName.toLowerCase()) || coopName.toLowerCase().includes(item.cooperative.toLowerCase())) && item.stock < 0.3 * item.capacityMax;
+    }
+    return item.stock < 0.3 * item.capacityMax;
+  });
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12" id="dashboard-view">
@@ -46,7 +102,9 @@ export default function DashboardScreen({ user, lang, onNavigateToTab, supplierH
           <div className="flex justify-between items-start">
             <div>
               <p className="text-[#64748B] text-xs font-mono font-bold uppercase tracking-wider">{t.lowStockWarning}</p>
-              <h3 className="text-3xl font-extrabold text-rose-600 mt-2 tracking-tight">08 SKU</h3>
+              <h3 className="text-3xl font-extrabold text-rose-600 mt-2 tracking-tight">
+                {String(lowStockItems.length).padStart(2, '0')} SKU
+              </h3>
             </div>
             <span className="material-symbols-outlined text-rose-600 bg-red-100 p-2 rounded-lg">warning</span>
           </div>
@@ -70,7 +128,7 @@ export default function DashboardScreen({ user, lang, onNavigateToTab, supplierH
             </p>
           </div>
           <button
-            onClick={() => onNavigateToTab('detail', { step: 'bidding' })}
+            onClick={() => onNavigateToTab('detail', { step: 'verification' })}
             className="mt-4 text-[#3B82F6] text-xs font-bold flex items-center gap-1 hover:underline cursor-pointer focus:outline-none w-fit"
           >
             {t.viewAnalysis}
@@ -79,130 +137,71 @@ export default function DashboardScreen({ user, lang, onNavigateToTab, supplierH
         </div>
       </div>
 
-      {/* Active sessions */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold text-[#0b1c30]">{t.activeSessions}</h3>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          {/* Card 1: Urea session */}
-          <div className="bg-white border border-[#E2E8F0] rounded-xl overflow-hidden flex flex-col md:flex-row shadow-sm hover:shadow-md transition-all duration-300">
-            {/* Status bar left */}
-            <div className="w-full md:w-1.5 h-1.5 md:h-auto bg-amber-500"></div>
-            <div className="p-5 flex-1 flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h4 className="font-bold text-base text-[#0d1527]">Pupuk Urea - Jun 2026</h4>
-                    <p className="text-[#64748b] text-xs mt-0.5">ID: PB-2026-0042</p>
-                  </div>
-                  <span className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full text-[10px] font-bold uppercase tracking-wider">
-                    NEGOTIATING
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 my-4">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-slate-400">corporate_fare</span>
-                    <div>
-                      <p className="text-[10px] text-[#64748b] uppercase tracking-wide font-medium leading-none">{t.partisipan}</p>
-                      <p className="font-bold text-xs text-[#0f172a] mt-1">3 Koperasi</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-slate-400">scale</span>
-                    <div>
-                      <p className="text-[10px] text-[#64748b] uppercase tracking-wide font-medium leading-none">{t.totalVolume}</p>
-                      <p className="font-bold text-xs text-[#0f172a] mt-1">250 Ton</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-gray-100 flex justify-between items-center mt-3">
-                <div className="flex -space-x-2 overflow-hidden">
-                  <img
-                    alt="Cooperative avatar" 
-                    className="w-7 h-7 rounded-full border-2 border-white object-cover" 
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuBavr-ioVpbMjlsSoSmLbYZMi5c3qhm6ANuZtkHxL6JPEVtsHUiSt3WcoxHmgAW8IrFHLmIrKmtuIALYBd-Z5B1pLnCepvBiRidgCJVZ7Yhp_YWVkdWkDgySEaxEwu0orhBGrcs4QAw_SAi_phCu6M_qK0mXmFNheeaEipqXwkQo-iVGROir_nC7A9o-pfgfxcHB4C8OP-mNZbVWQ_g11bEeMivZl97tx0--I0iFhPVb93in1gk44EneDYE62xBabAftEvlLOb64DvX"
-                    referrerPolicy="no-referrer"
-                  />
-                  <img
-                    alt="Cooperative avatar 2" 
-                    className="w-7 h-7 rounded-full border-2 border-white object-cover" 
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuCuGYGrvONT812oostw41O-2JFaaaQncdcabxcoH7RAenjMFSrYeO0PtWu9B3EPv73iK29ULBcZsr-xR9trYTFupWwDdzdqgcFJ-y34RZ5fl_tqtCU-LH8DDNiqH1Jj1KSYRA8tRiP9zSNJR5mVyrZKDtpKQd7pTZB5N04UWknYsW7_yO9nkBxI-g4ZbC3bnVlRB4sMmJVPnrE1DefhU2t1AYA5li_sMtWEK8kl5vN8gKbfI4ZSg1osK_BEfoHdSTz6sSLE2GCyC5ku"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="w-7 h-7 rounded-full bg-slate-100 border-2 border-white flex items-center justify-center text-[9px] font-bold text-slate-500">+1</div>
-                </div>
-                <button
-                  onClick={() => onNavigateToTab('detail', { step: 'bidding' })}
-                  className="text-[#3B82F6] font-bold text-xs border border-blue-500/50 px-3.5 py-1.5 rounded-lg hover:bg-[#3B82F6]/5 active:scale-95 transition-all focus:outline-none"
-                >
-                  {t.pantauSesi}
-                </button>
-              </div>
-            </div>
+      {/* Low Stock SKU Alerts Section */}
+      {lowStockItems.length > 0 && (
+        <div className="space-y-3 animate-fade-in" id="low-stock-dashboard-alerts">
+          <div className="flex items-center gap-2 text-rose-600">
+            <span className="material-symbols-outlined font-bold select-none text-[22px]">warning</span>
+            <h3 className="text-lg font-bold text-[#0b1c30]">{lang === 'id' ? 'Peringatan SKU: Stok Tipis' : 'Low Stock SKU Alerts'}</h3>
           </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {lowStockItems.map((item) => {
+              const rec = aiRecommendations[item.sku];
+              const recommendedVolume = rec ? rec.recommendedVolume : (item.capacityMax - item.stock);
+              const reasoningText = rec ? rec.reasoningId : (lang === 'id' 
+                ? `Buat pesanan baru sebanyak ${recommendedVolume} ${item.unit} untuk mengisi kapasitas gudang.`
+                : `Create a restock order of ${recommendedVolume} ${item.unit} to replenish warehouse.`);
 
-          {/* Card 2: NPK session */}
-          <div className="bg-white border border-[#E2E8F0] rounded-xl overflow-hidden flex flex-col md:flex-row shadow-sm hover:shadow-md transition-all duration-300">
-            {/* Status bar left */}
-            <div className="w-full md:w-1.5 h-1.5 md:h-auto bg-[#3B82F6]"></div>
-            <div className="p-5 flex-1 flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h4 className="font-bold text-base text-[#0d1527]">Pupuk NPK - Jun 2026</h4>
-                    <p className="text-[#64748b] text-xs mt-0.5">ID: PB-2026-0051</p>
-                  </div>
-                  <span className="px-2.5 py-1 bg-blue-50 text-blue-800 rounded-full text-[10px] font-bold uppercase tracking-wider">
-                    COLLECTING
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 mt-3 mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-slate-400">corporate_fare</span>
-                    <div>
-                      <p className="text-[10px] text-[#64748b] uppercase tracking-wide font-medium leading-none">{t.partisipan}</p>
-                      <p className="font-bold text-xs text-[#0f172a] mt-1">2 Koperasi</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-slate-400">scale</span>
-                    <div>
-                      <p className="text-[10px] text-[#64748b] uppercase tracking-wide font-medium leading-none">{t.totalVolume}</p>
-                      <p className="font-bold text-xs text-[#0f172a] mt-1">180 Ton</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Progress bar info */}
-                <div className="mt-3">
-                  <div className="flex justify-between text-[11px] mb-1 font-medium">
-                    <span className="text-[#64748b]">{t.targetVolume}</span>
-                    <span className="font-bold text-slate-800">180 / 200 Ton</span>
-                  </div>
-                  <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-[#3B82F6] rounded-full transition-all duration-500" style={{ width: '90%' }}></div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-gray-100 flex justify-end">
-                <button
-                  onClick={() => alert(lang === 'id' ? 'Permintaan pengajuan penambahan kuota berhasil dikirim.' : 'Quota increase proposal submitted successfully.')}
-                  className="bg-[#3B82F6] text-white font-bold text-xs px-3.5 py-1.5 rounded-lg hover:bg-blue-700 active:scale-95 transition-all focus:outline-none"
+              return (
+                <div 
+                  key={item.id} 
+                  className="bg-rose-50/50 border border-rose-100 rounded-xl p-4 flex justify-between items-center shadow-sm relative overflow-hidden transition-all hover:bg-rose-50/70 hover:shadow-md"
                 >
-                  {t.tambahKuota}
-                </button>
-              </div>
-            </div>
+                  <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-rose-500"></div>
+                  <div className="pl-2.5 flex-1 pr-4">
+                    <div className="flex items-center gap-2">
+                      <span className="font-extrabold text-sm text-[#0f172a]">{item.name}</span>
+                      <span className="font-mono text-[10px] bg-rose-100 text-rose-800 font-bold px-1.5 py-0.5 rounded uppercase">{item.sku}</span>
+                    </div>
+                    <p className="text-xs text-rose-700 font-semibold mt-1">
+                      {lang === 'id' 
+                        ? `Stok kritis: ${item.stock} ${item.unit} (Batas minimum: ${item.threshold} ${item.unit})`
+                        : `Critical stock: ${item.stock} ${item.unit} (Min limit: ${item.threshold} ${item.unit})`}
+                    </p>
+                    <div className="mt-2 space-y-1 bg-white/70 border border-rose-100 p-2.5 rounded-lg text-[11px] text-[#0b1c30]">
+                      <div className="flex items-center gap-1 text-blue-600 font-extrabold uppercase text-[9px] font-mono">
+                        <span className="material-symbols-outlined text-[14px] font-bold">cloud</span>
+                        {lang === 'id' ? 'Saran Cuaca AI BMKG' : 'BMKG AI Climate Decision'}
+                      </div>
+                      <p className="font-bold text-[11px] text-rose-900 leading-tight">
+                        {lang === 'id' ? 'Saran Volume: ' : 'Recommended Volume: '}<span className="text-blue-600 font-black font-mono">{recommendedVolume} {item.unit}</span>
+                      </p>
+                      <p className="text-slate-600 leading-snug mt-0.5 font-medium">
+                        Saran AI: {reasoningText}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => onNavigateToTab('detail', { 
+                      step: 'verification', 
+                      mode: 'mandiri', 
+                      sku: item.sku, 
+                      recommendQty: recommendedVolume,
+                      productName: item.name,
+                      weatherRecommendation: rec
+                    })}
+                    className="w-10 h-10 rounded-full bg-rose-100 hover:bg-rose-200 text-rose-700 flex items-center justify-center transition-all active:scale-90 shadow-sm border border-rose-200/20 cursor-pointer focus:outline-none shrink-0"
+                    title={lang === 'id' ? 'Buat Pesanan Restock' : 'Create Restock Order'}
+                  >
+                    <span className="material-symbols-outlined text-[20px] font-bold">arrow_forward</span>
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
-      </div>
+      )}
+
 
       {/* Bottom Row split */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

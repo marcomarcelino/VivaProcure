@@ -13,18 +13,32 @@ export default function LoginScreen({ onLoginSuccess, lang, setLang }: LoginScre
   const [password, setPassword] = useState('password123');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const t = TRANSLATIONS[lang];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate logging in as Budy Santoso
-    onLoginSuccess({
-      name: lang === 'id' ? 'Budi Santoso' : 'Budi Santoso',
-      role: lang === 'id' ? 'Ketua Koperasi' : 'Cooperative Chairman',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuA-JfLwcBnjLPADNXE7w_78XNXdvEUZJw33ZlZkbuqQZJ8EGsu3AY-G1wix4E8lRcjBOUR_qgIT1h9410OY3xnH7NvJlyFM9sFQrOpS9WoE8yuj3U2ktwKJ74kwVkzKDa31zlWuzxqJDsSFP0LR-gFzL0USEuLHn5X_V4FV5t36bgiHPUKT07Sd0DDgOHzxnVcsAXTSBzm3IfKMyhIjVtjHDRz48rBSYi8euUVSU5uMAA8tF4PdJbZrWuzT9cnqURGYx9PxEC-epYSQ',
-      cooperative: lang === 'id' ? 'Koperasi Tani Makmur' : 'Tani Makmur Cooperative'
-    });
+    setError(null);
+
+    fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || (lang === 'id' ? 'Login gagal. Silakan coba lagi.' : 'Login failed. Please try again.'));
+        }
+        return res.json();
+      })
+      .then((user) => {
+        onLoginSuccess(user);
+      })
+      .catch((err) => {
+        setError(err.message);
+      });
   };
 
   return (
@@ -113,6 +127,13 @@ export default function LoginScreen({ onLoginSuccess, lang, setLang }: LoginScre
             </div>
 
             <form className="space-y-6" onSubmit={handleSubmit} id="login-form">
+              {error && (
+                <div className="p-3 bg-red-50 border border-red-200 text-rose-600 rounded-xl text-xs font-semibold flex items-center gap-2 mb-4">
+                  <span className="material-symbols-outlined text-[16px] font-bold">error_outline</span>
+                  {error}
+                </div>
+              )}
+
               {/* Email Field */}
               <div className="space-y-2">
                 <label className="block text-[11px] font-bold text-[#6b7280] uppercase tracking-widest" htmlFor="email-input">
@@ -190,6 +211,47 @@ export default function LoginScreen({ onLoginSuccess, lang, setLang }: LoginScre
                 <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
               </button>
             </form>
+
+            {/* Demo Credentials Helper */}
+            <div className="mt-6 p-4 bg-slate-50 border border-gray-200/60 rounded-xl space-y-2.5">
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                {lang === 'id' ? 'Klik untuk mengisi data uji:' : 'Click to autofill test credentials:'}
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => { setEmail('superadmin@vivaprocure.com'); setPassword('password123'); }}
+                  className="p-2.5 border border-gray-200 hover:border-[#3B82F6] hover:bg-[#eff4ff]/20 rounded-lg bg-white text-left font-semibold text-slate-700 transition-colors focus:outline-none cursor-pointer"
+                >
+                  <span className="font-extrabold text-blue-600 block">Super Admin</span>
+                  superadmin@vivaprocure.com
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setEmail('budi@koperasi.com'); setPassword('password123'); }}
+                  className="p-2.5 border border-gray-200 hover:border-[#3B82F6] hover:bg-[#eff4ff]/20 rounded-lg bg-white text-left font-semibold text-slate-700 transition-colors focus:outline-none cursor-pointer"
+                >
+                  <span className="font-extrabold text-blue-600 block">Admin Sumber Makmur</span>
+                  budi@koperasi.com
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setEmail('andi@koperasi.com'); setPassword('password123'); }}
+                  className="p-2.5 border border-gray-200 hover:border-[#3B82F6] hover:bg-[#eff4ff]/20 rounded-lg bg-white text-left font-semibold text-slate-700 transition-colors focus:outline-none cursor-pointer"
+                >
+                  <span className="font-extrabold text-blue-600 block">Admin Padiwangi</span>
+                  andi@koperasi.com
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setEmail('supplier@vivaprocure.com'); setPassword('password123'); }}
+                  className="p-2.5 border border-gray-200 hover:border-[#3B82F6] hover:bg-[#eff4ff]/20 rounded-lg bg-white text-left font-semibold text-slate-700 transition-colors focus:outline-none cursor-pointer"
+                >
+                  <span className="font-extrabold text-blue-600 block">Mitra Pemasok</span>
+                  supplier@vivaprocure.com
+                </button>
+              </div>
+            </div>
 
             {/* AI Insight Hint */}
             <div className="mt-8 p-4 bg-[#eff4ff] border border-gray-200/50 rounded-xl flex gap-3.5 items-start">

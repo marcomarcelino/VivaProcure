@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, SmartContract, Order, SupplierHealth } from './types';
 import LoginScreen from './components/LoginScreen';
 import DashboardScreen from './components/DashboardScreen';
@@ -20,90 +20,158 @@ export default function App() {
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
   const [supplierHealths, setSupplierHealths] = useState<SupplierHealth[]>(INITIAL_SUPPLIER_HEALTHS);
 
+  // Auto-login user if exists in DB or localStorage on mount
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('vivaprocure_user_email');
+    const url = savedEmail ? `/api/user?email=${encodeURIComponent(savedEmail)}` : '/api/user';
+    fetch(url)
+      .then(res => res.json())
+      .then(data => {
+        if (data) setUser(data);
+      })
+      .catch(err => console.error("Error auto-login:", err));
+  }, []);
+
+  // Sync state data from PostgreSQL database
+  useEffect(() => {
+    if (!user) return;
+
+    fetch('/api/contracts')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.length > 0) setContracts(data);
+      })
+      .catch(err => console.error("Error fetching contracts:", err));
+
+    fetch('/api/orders')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.length > 0) setOrders(data);
+      })
+      .catch(err => console.error("Error fetching orders:", err));
+
+    fetch('/api/supplier-health')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.length > 0) setSupplierHealths(data);
+      })
+      .catch(err => console.error("Error fetching supplier health:", err));
+  }, [user]);
+
+  // Enforce role-based routing checks
+  useEffect(() => {
+    if (user && user.role === 'supplier') {
+      const restrictedTabs = ['detail', 'stok', 'supplier-matrix', 'ai'];
+      if (restrictedTabs.includes(currentTab)) {
+        setCurrentTab('dasbor');
+      }
+    }
+  }, [user, currentTab]);
+
   const handleUpdateOrderStatus = (
     orderId: string,
     status: 'dikemas' | 'dikirim' | 'sampai' | 'diterima',
     meta?: { rating?: number; ratingDetails?: any; reviewComment?: string }
   ) => {
-    setOrders(prev => prev.map(order => {
-      if (order.id !== orderId) return order;
+    const orderToUpdate = orders.find(o => o.id === orderId);
+    if (!orderToUpdate) return;
 
-      const updatedTimeline = order.timeline.map(step => {
-        const stepsOrder: Array<'dikemas' | 'dikirim' | 'sampai' | 'diterima'> = ['dikemas', 'dikirim', 'sampai', 'diterima'];
-        const targetIndex = stepsOrder.indexOf(status);
-        const currentIndex = stepsOrder.indexOf(step.status);
+    const updatedTimeline = orderToUpdate.timeline.map(step => {
+      const stepsOrder: Array<'dikemas' | 'dikirim' | 'sampai' | 'diterima'> = ['dikemas', 'dikirim', 'sampai', 'diterima'];
+      const targetIndex = stepsOrder.indexOf(status);
+      const currentIndex = stepsOrder.indexOf(step.status);
 
-        const isCompleted = currentIndex <= targetIndex;
-        const isActive = step.status === status;
+      const isCompleted = currentIndex <= targetIndex;
+      const isActive = step.status === status;
 
-        let timestamp = step.timestamp;
-        if (isCompleted && !timestamp) {
-          timestamp = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
-        }
-
-        return {
-          ...step,
-          isCompleted,
-          isActive,
-          timestamp
-        };
-      });
-
-      let lastPositionGPS = order.lastPositionGPS;
-      if (status === 'dikirim') {
-        lastPositionGPS = lang === 'id' ? 'Toll Cikampek KM 72 - Truk Sedang Berjalan' : 'Cikampek Toll road KM 72 - Vehicle in motion';
-      } else if (status === 'sampai') {
-        lastPositionGPS = lang === 'id' ? 'Gudang Utama Koperasi Tani Makmur' : 'Tani Makmur Cooperative Main Warehouse';
-      } else if (status === 'diterima') {
-        lastPositionGPS = lang === 'id' ? 'Selesai Diterima (Disimpan di Gudang & Tercatat Aman)' : 'Successfully Received (Ingested & Recorded Safely)';
+      let timestamp = step.timestamp;
+      if (isCompleted && !timestamp) {
+        timestamp = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
       }
 
       return {
-        ...order,
-        currentStatus: status,
-        lastPositionGPS,
-        lastCheckedTime: new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
-        timeline: updatedTimeline,
-        rating: meta?.rating !== undefined ? meta.rating : order.rating,
-        ratingDetails: meta?.ratingDetails !== undefined ? meta.ratingDetails : order.ratingDetails,
-        reviewComment: meta?.reviewComment !== undefined ? meta.reviewComment : order.reviewComment
+        ...step,
+        isCompleted,
+        isActive,
+        timestamp
       };
-    }));
+    });
+
+    let lastPositionGPS = orderToUpdate.lastPositionGPS;
+    if (status === 'dikirim') {
+      lastPositionGPS = lang === 'id' ? 'Toll Cikampek KM 72 - Truk Sedang Berjalan' : 'Cikampek Toll road KM 72 - Vehicle in motion';
+    } else if (status === 'sampai') {
+      lastPositionGPS = lang === 'id' ? 'Gudang Utama Koperasi Sumber Makmur' : 'Sumber Makmur Cooperative Main Warehouse';
+    } else if (status === 'diterima') {
+      lastPositionGPS = lang === 'id' ? 'Selesai Diterima (Disimpan di Gudang & Tercatat Aman)' : 'Successfully Received (Ingested & Recorded Safely)';
+    }
+
+    const updatedOrder = {
+      ...orderToUpdate,
+      currentStatus: status,
+      lastPositionGPS,
+      lastCheckedTime: new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ', ' + new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
+      timeline: updatedTimeline,
+      rating: meta?.rating !== undefined ? meta.rating : orderToUpdate.rating,
+      ratingDetails: meta?.ratingDetails !== undefined ? meta.ratingDetails : orderToUpdate.ratingDetails,
+      reviewComment: meta?.reviewComment !== undefined ? meta.reviewComment : orderToUpdate.reviewComment
+    };
+
+    setOrders(prev => prev.map(o => o.id === orderId ? updatedOrder : o));
+
+    fetch(`/api/orders/${orderId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updatedOrder),
+    }).catch(err => console.error("Error updating order DB:", err));
   };
 
   const handleRateSupplier = (supplierName: string, stars: number) => {
-    setSupplierHealths(prev => prev.map(sup => {
-      if (sup.name.toLowerCase() !== supplierName.toLowerCase()) return sup;
+    const supToUpdate = supplierHealths.find(s => s.name.toLowerCase() === supplierName.toLowerCase());
+    if (!supToUpdate) return;
 
-      let scoreChange = 0;
-      if (stars === 5) scoreChange = 3;
-      else if (stars === 4) scoreChange = 1;
-      else if (stars === 3) scoreChange = 0;
-      else if (stars === 2) scoreChange = -5;
-      else if (stars === 1) scoreChange = -15;
+    let scoreChange = 0;
+    if (stars === 5) scoreChange = 3;
+    else if (stars === 4) scoreChange = 1;
+    else if (stars === 3) scoreChange = 0;
+    else if (stars === 2) scoreChange = -5;
+    else if (stars === 1) scoreChange = -15;
 
-      const percentage = Math.max(20, Math.min(100, sup.percentage + scoreChange));
-      
-      let status: 'SANGAT BAIK' | 'WASPADA' | 'BAIK' = 'BAIK';
-      if (percentage >= 90) status = 'SANGAT BAIK';
-      else if (percentage >= 70) status = 'BAIK';
-      else status = 'WASPADA';
+    const percentage = Math.max(20, Math.min(100, supToUpdate.percentage + scoreChange));
 
-      return {
-        ...sup,
-        percentage,
-        status
-      };
-    }));
+    let status: 'SANGAT BAIK' | 'WASPADA' | 'BAIK' = 'BAIK';
+    if (percentage >= 90) status = 'SANGAT BAIK';
+    else if (percentage >= 70) status = 'BAIK';
+    else status = 'WASPADA';
+
+    const updatedSup = {
+      ...supToUpdate,
+      percentage,
+      status
+    };
+
+    setSupplierHealths(prev => prev.map(s => s.name.toLowerCase() === supplierName.toLowerCase() ? updatedSup : s));
+
+    fetch(`/api/supplier-health/${encodeURIComponent(updatedSup.name)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ percentage, status }),
+    }).catch(err => console.error("Error updating supplier health DB:", err));
   };
 
-  const handleAddContract = (newContract: SmartContract) => {
+  const handleAddContract = (newContract: SmartContract, allocation?: Record<string, number>) => {
     setContracts(prev => {
       if (prev.some(c => c.id === newContract.id)) {
         return prev;
       }
       return [newContract, ...prev];
     });
+
+    fetch('/api/contracts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newContract),
+    }).catch(err => console.error("Error creating contract DB:", err));
 
     // Create an associated e-commerce tracking Order automatically!
     const newOrderId = `ORD/2026-${newContract.id.split('-').pop() || '004'}`;
@@ -115,6 +183,7 @@ export default function App() {
       quantity: newContract.quantity,
       totalValue: newContract.totalValue,
       currentStatus: 'dikemas',
+      allocation: allocation || { "Sumber Makmur": parseFloat(newContract.quantity) || 100 },
       courierName: 'Slamet Rahardjo',
       courierPhone: '0813-2287-9402',
       lastPositionGPS: lang === 'id' ? 'Gudang Pusat Pemasok (Sedang Packing)' : 'Supplier Center Depot (Cargo Packing)',
@@ -157,22 +226,35 @@ export default function App() {
     };
 
     setOrders(prev => [newOrder, ...prev]);
+
+    fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newOrder),
+    }).catch(err => console.error("Error creating order DB:", err));
   };
 
   const t = TRANSLATIONS[lang];
 
+  const [detailState, setDetailState] = useState<any>(null);
+
   // Helper function to handle internal redirection between screens
   const handleNavigateToTab = (tab: string, state?: any) => {
     setCurrentTab(tab);
-    if (tab === 'detail' && state?.step) {
-      setDetailStepOverride(state.step);
+    if (tab === 'detail') {
+      setDetailState(state || null);
+      if (state?.step) {
+        setDetailStepOverride(state.step);
+      }
     } else {
+      setDetailState(null);
       setDetailStepOverride(undefined);
     }
   };
 
   // Logout reset
   const handleLogout = () => {
+    localStorage.removeItem('vivaprocure_user_email');
     setUser(null);
     setCurrentTab('dasbor');
     setDetailStepOverride(undefined);
@@ -184,7 +266,12 @@ export default function App() {
       <LoginScreen
         lang={lang}
         setLang={setLang}
-        onLoginSuccess={(userData) => setUser(userData)}
+        onLoginSuccess={(userData) => {
+          if (userData && userData.email) {
+            localStorage.setItem('vivaprocure_user_email', userData.email);
+          }
+          setUser(userData);
+        }}
       />
     );
   }
@@ -230,7 +317,11 @@ export default function App() {
             />
             <div className="min-w-0 flex-1">
               <h4 className="font-bold text-xs truncate text-white leading-tight">{user.name}</h4>
-              <p className="text-[10px] text-gray-400 truncate mt-0.5 font-medium leading-none">{user.role}</p>
+              <p className="text-[9px] text-blue-400 font-extrabold uppercase tracking-wider mt-0.5 leading-none">
+                {user.role === 'super_admin' ? (lang === 'id' ? 'Super Admin' : 'Super Admin') :
+                 user.role === 'cooperative_admin' ? (lang === 'id' ? 'Admin Koperasi' : 'Cooperative Admin') :
+                 (lang === 'id' ? 'Mitra Pemasok' : 'Supplier Partner')}
+              </p>
             </div>
           </div>
 
@@ -247,16 +338,20 @@ export default function App() {
               {t.dasbor}
             </button>
 
-            {/* Detail Sesi link */}
-            <button
-              onClick={() => { setCurrentTab('detail'); setDetailStepOverride(undefined); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border-none outline-none cursor-pointer focus:outline-none ${
-                currentTab === 'detail' ? 'bg-[#3B82F6] text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[20px]">receipt_long</span>
-              {t.detailSesi}
-            </button>
+            {user.role !== 'supplier' && (
+              <>
+                {/* Detail Sesi link */}
+                <button
+                  onClick={() => { setCurrentTab('detail'); setDetailStepOverride(undefined); setIsSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border-none outline-none cursor-pointer focus:outline-none ${
+                    currentTab === 'detail' ? 'bg-[#3B82F6] text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[20px]">receipt_long</span>
+                  {t.detailSesi}
+                </button>
+              </>
+            )}
 
             {/* Smart Contract link */}
             <button
@@ -269,28 +364,32 @@ export default function App() {
               {t.contracts}
             </button>
 
-            {/* Asisten AI Link */}
-            <button
-              onClick={() => { setCurrentTab('ai'); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border-none outline-none cursor-pointer focus:outline-none relative overflow-hidden group ${
-                currentTab === 'ai' ? 'bg-gradient-to-r from-[#3B82F6] to-blue-700 text-white shadow-sm border border-blue-500/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[20px] text-blue-400 font-bold group-hover:scale-110 transition-transform">auto_awesome</span>
-              <span className="relative z-10">{t.asistenAI}</span>
-              <span className="ml-auto text-[8px] bg-blue-500/20 text-blue-300 font-mono font-bold px-1.5 py-0.5 rounded uppercase select-none">AI</span>
-            </button>
+            {user.role !== 'supplier' && (
+              <>
+                {/* Asisten AI Link */}
+                <button
+                  onClick={() => { setCurrentTab('ai'); setIsSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border-none outline-none cursor-pointer focus:outline-none relative overflow-hidden group ${
+                    currentTab === 'ai' ? 'bg-gradient-to-r from-[#3B82F6] to-blue-700 text-white shadow-sm border border-blue-500/25' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[20px] text-blue-400 font-bold group-hover:scale-110 transition-transform">auto_awesome</span>
+                  <span className="relative z-10">{t.asistenAI}</span>
+                  <span className="ml-auto text-[8px] bg-blue-500/20 text-blue-300 font-mono font-bold px-1.5 py-0.5 rounded uppercase select-none">AI</span>
+                </button>
 
-            {/* Stok link */}
-            <button
-              onClick={() => { setCurrentTab('stok'); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border-none outline-none cursor-pointer focus:outline-none ${
-                currentTab === 'stok' ? 'bg-[#3B82F6] text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[20px]">warehouse</span>
-              {t.stokInventaris}
-            </button>
+                {/* Stok link */}
+                <button
+                  onClick={() => { setCurrentTab('stok'); setIsSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border-none outline-none cursor-pointer focus:outline-none ${
+                    currentTab === 'stok' ? 'bg-[#3B82F6] text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[20px]">warehouse</span>
+                  {t.stokInventaris}
+                </button>
+              </>
+            )}
 
             {/* Order Tracking link */}
             <button
@@ -303,16 +402,20 @@ export default function App() {
               {t.lacakOrder}
             </button>
 
-            {/* Supplier Matrix link */}
-            <button
-              onClick={() => { setCurrentTab('supplier-matrix'); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border-none outline-none cursor-pointer focus:outline-none ${
-                currentTab === 'supplier-matrix' ? 'bg-[#3B82F6] text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[20px]">query_stats</span>
-              {t.matriksPemasok}
-            </button>
+            {user.role !== 'supplier' && (
+              <>
+                {/* Supplier Matrix link */}
+                <button
+                  onClick={() => { setCurrentTab('supplier-matrix'); setIsSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border-none outline-none cursor-pointer focus:outline-none ${
+                    currentTab === 'supplier-matrix' ? 'bg-[#3B82F6] text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[20px]">query_stats</span>
+                  {t.matriksPemasok}
+                </button>
+              </>
+            )}
           </nav>
         </div>
 
@@ -400,8 +503,11 @@ export default function App() {
             <DataCollectionScreen
               lang={lang}
               initialStep={detailStepOverride}
+              navigationState={detailState}
               onNavigateToTab={handleNavigateToTab}
               onAddContract={handleAddContract}
+              contracts={contracts}
+              user={user}
             />
           )}
 
@@ -410,6 +516,7 @@ export default function App() {
               lang={lang}
               contracts={contracts}
               onAddContract={handleAddContract}
+              user={user}
             />
           )}
 
@@ -418,7 +525,7 @@ export default function App() {
           )}
 
           {currentTab === 'stok' && (
-            <StokInventarisScreen lang={lang} />
+            <StokInventarisScreen lang={lang} user={user} />
           )}
 
           {currentTab === 'order' && (
@@ -427,6 +534,7 @@ export default function App() {
               orders={orders}
               onUpdateOrderStatus={handleUpdateOrderStatus}
               onRateSupplier={handleRateSupplier}
+              user={user}
             />
           )}
 

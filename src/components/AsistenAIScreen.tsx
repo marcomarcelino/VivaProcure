@@ -14,21 +14,34 @@ export default function AsistenAIScreen({ lang }: AsistenAIScreenProps) {
   const t = TRANSLATIONS[lang];
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Initialize with welcome message from VivaAI
+  // Load chat messages from DB on mount
   useEffect(() => {
-    setMessages([
-      {
-        id: 'welcome-message',
-        sender: 'ai',
-        text: lang === 'id' 
-          ? 'Halo Budi S.! Saya asisten VivaAI milik koperasi Anda. Saya dapat menganalisis penawaran harga, status stok, tren cuaca mitigasi risiko logistik, atau mempersiapkan draf restock otomatis ke supplier utama. Ajukan pertanyaan Anda sekarang.'
-          : 'Hello Budi S.! I am VivaAI, your cooperative procurement intelligence. Ask me about crop price comparison, supply warnings, weather mitigations, or generate draft replenishment contracts automatically.',
-        timestamp: new Date(),
-        chips: lang === 'id' 
-          ? ['Bandingkan Harga Urea', 'Cek Stok Gudang', 'Bagaimana Cuaca Jawa Tengah?']
-          : ['Compare Urea Prices', 'Check Stock Levels', 'What is Central Java weather?']
-      }
-    ]);
+    fetch('/api/chat-messages')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.length > 0) {
+          const formatted = data.map((m: any) => ({
+            ...m,
+            timestamp: new Date(m.timestamp)
+          }));
+          setMessages(formatted);
+        } else {
+          setMessages([
+            {
+              id: 'welcome-message',
+              sender: 'ai',
+              text: lang === 'id' 
+                ? 'Halo Budi S.! Saya asisten VivaAI milik koperasi Anda. Saya dapat menganalisis penawaran harga, status stok, tren cuaca mitigasi risiko logistik, atau mempersiapkan draf restock otomatis ke supplier utama. Ajukan pertanyaan Anda sekarang.'
+                : 'Hello Budi S.! I am VivaAI, your cooperative procurement intelligence. Ask me about crop price comparison, supply warnings, weather mitigations, or generate draft replenishment contracts automatically.',
+              timestamp: new Date(),
+              chips: lang === 'id' 
+                ? ['Bandingkan Harga Urea', 'Cek Stok Gudang', 'Bagaimana Cuaca Jawa Tengah?']
+                : ['Compare Urea Prices', 'Check Stock Levels', 'What is Central Java weather?']
+            }
+          ]);
+        }
+      })
+      .catch(err => console.error("Error loading chat history:", err));
   }, [lang]);
 
   // Auto-scroll chat to latest messages
@@ -49,6 +62,12 @@ export default function AsistenAIScreen({ lang }: AsistenAIScreenProps) {
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
     setIsSending(true);
+
+    fetch('/api/chat-messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userMsg)
+    }).catch(err => console.error("Error saving user msg:", err));
 
     try {
       // API request to server-side Gemini Proxy endpoint
@@ -74,6 +93,13 @@ export default function AsistenAIScreen({ lang }: AsistenAIScreenProps) {
       };
 
       setMessages(prev => [...prev, aiMsg]);
+
+      fetch('/api/chat-messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(aiMsg)
+      }).catch(err => console.error("Error saving AI msg:", err));
+
     } catch (err) {
       console.error(err);
       // Fail gracefully with a helpful offline-powered AI fallback message
@@ -81,11 +107,18 @@ export default function AsistenAIScreen({ lang }: AsistenAIScreenProps) {
         id: `ai-msg-fallback-${Date.now()}`,
         sender: 'ai',
         text: lang === 'id'
-          ? 'Mohon maaf, koneksi API sedang terputus atau backend server sedang dimuat. Namun berdasarkan database lokal: Pupuk Urea sedang limit kritis (450/1000 Ton di Koperasi Tani Makmur). Disarankan melakukan otorisasi sesi pengadaan #PRC-2024-089 segera.'
-          : 'Apologies, the live API endpoint is loading. According to local state: Urea Fertilizer stock levels are critical (450/1000 Tons at Tani Makmur Coop). Replenishment of session #PRC-2024-089 is recommended.',
+          ? 'Mohon maaf, koneksi API sedang terputus atau backend server sedang dimuat. Namun berdasarkan database lokal: Pupuk Urea sedang limit kritis (450/1000 Ton di Koperasi Sumber Makmur). Disarankan melakukan otorisasi sesi pengadaan #PRC-2024-089 segera.'
+          : 'Apologies, the live API endpoint is loading. According to local state: Urea Fertilizer stock levels are critical (450/1000 Tons at Sumber Makmur Coop). Replenishment of session #PRC-2024-089 is recommended.',
         timestamp: new Date()
       };
       setMessages(prev => [...prev, fallbackMsg]);
+
+      fetch('/api/chat-messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fallbackMsg)
+      }).catch(err => console.error("Error saving fallback msg:", err));
+
     } finally {
       setIsSending(false);
     }
@@ -137,7 +170,7 @@ export default function AsistenAIScreen({ lang }: AsistenAIScreenProps) {
               <div className="w-0.5 h-3.5 bg-gray-300 ml-1"></div>
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
-                <span>Koperasi Tani Makmur (Target)</span>
+                <span>Koperasi Sumber Makmur (Target)</span>
               </div>
             </div>
           </div>

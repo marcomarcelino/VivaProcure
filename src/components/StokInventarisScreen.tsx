@@ -1,26 +1,75 @@
-import React, { useState } from 'react';
-import { StockItem, StockLog } from '../types';
+import React, { useState, useEffect } from 'react';
+import { StockItem, StockLog, User } from '../types';
 import { INITIAL_STOCK_ITEMS, INITIAL_STOCK_LOGS, TRANSLATIONS } from '../data';
 
 interface StokInventarisScreenProps {
   lang: 'id' | 'en';
+  user: User | null;
 }
 
-export default function StokInventarisScreen({ lang }: StokInventarisScreenProps) {
+export default function StokInventarisScreen({ lang, user }: StokInventarisScreenProps) {
   const [stockList, setStockList] = useState<StockItem[]>(INITIAL_STOCK_ITEMS);
-  const [stockLogs] = useState<StockLog[]>(INITIAL_STOCK_LOGS);
+  const [stockLogs, setStockLogs] = useState<StockLog[]>(INITIAL_STOCK_LOGS);
   const [isInputModalOpen, setIsInputModalOpen] = useState(false);
+
+  // Load stocks and logs from database on mount
+  useEffect(() => {
+    fetch('/api/stocks')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.length > 0) setStockList(data);
+      })
+      .catch(err => console.error("Error loading stocks:", err));
+
+    fetch('/api/stock-logs')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.length > 0) setStockLogs(data);
+      })
+      .catch(err => console.error("Error loading stock logs:", err));
+  }, []);
 
   // New stock form fields
   const [newProductName, setNewProductName] = useState('');
   const [newSku, setNewSku] = useState('');
-  const [newCoop, setNewCoop] = useState('Tani Makmur');
+  const [newCoop, setNewCoop] = useState('Sumber Makmur');
   const [newStock, setNewStock] = useState('500');
   const [newThreshold, setNewThreshold] = useState('800');
   const [newCapMax, setNewCapMax] = useState('1500');
   const [newUnit, setNewUnit] = useState('Ton');
 
+  // Pre-select cooperative in form based on logged-in user
+  useEffect(() => {
+    if (user && user.role === 'cooperative_admin') {
+      const coopName = user.cooperative || '';
+      if (coopName.toLowerCase().includes('sumber makmur')) {
+        setNewCoop('Sumber Makmur');
+      } else if (coopName.toLowerCase().includes('padiwangi')) {
+        setNewCoop('Padiwangi');
+      }
+    }
+  }, [user]);
+
   const t = TRANSLATIONS[lang];
+
+  // Calculate cooperative warehouse stocks dynamically
+  const smStockItems = stockList.filter(item => 
+    item.cooperative.toLowerCase().includes('sumber makmur') && item.unit === 'Ton'
+  );
+  const smStock = smStockItems.reduce((acc, item) => acc + item.stock, 0);
+  const smCap = smStockItems.reduce((acc, item) => acc + item.capacityMax, 0) || 2000;
+  const smPct = (smStock / smCap) * 100;
+
+  const pwStockItems = stockList.filter(item => 
+    item.cooperative.toLowerCase().includes('padiwangi') && item.unit === 'Ton'
+  );
+  const pwStock = pwStockItems.reduce((acc, item) => acc + item.stock, 0);
+  const pwCap = pwStockItems.reduce((acc, item) => acc + item.capacityMax, 0) || 3000;
+  const pwPct = (pwStock / pwCap) * 100;
+
+  const formatPct = (pct: number) => pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1);
+  const smPctStr = formatPct(smPct);
+  const pwPctStr = formatPct(pwPct);
 
   const handleCreateStock = (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,9 +82,10 @@ export default function StokInventarisScreen({ lang }: StokInventarisScreenProps
     const thresholdQty = parseFloat(newThreshold) || 0;
 
     let calStatus: 'KRITIS' | 'SELESAI' | 'PERINGATAN' = 'SELESAI';
-    if (currentQty < thresholdQty / 2) {
+    const maxCap = parseFloat(newCapMax) || 2000;
+    if (currentQty < 0.3 * maxCap) {
       calStatus = 'KRITIS';
-    } else if (currentQty < thresholdQty) {
+    } else if (currentQty < 0.5 * maxCap) {
       calStatus = 'PERINGATAN';
     }
 
@@ -53,6 +103,13 @@ export default function StokInventarisScreen({ lang }: StokInventarisScreenProps
 
     setStockList(prev => [newItem, ...prev]);
     setIsInputModalOpen(false);
+
+    // Persist new stock item to database
+    fetch('/api/stocks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newItem)
+    }).catch(err => console.error("Error creating stock item in DB:", err));
 
     // Reset fields
     setNewProductName('');
@@ -73,8 +130,8 @@ export default function StokInventarisScreen({ lang }: StokInventarisScreenProps
         <div className="flex gap-2.5 w-full sm:w-auto">
           <select className="h-11 px-4 text-xs font-bold rounded-xl border border-gray-200 bg-white shadow-sm outline-none text-[#0b1c30] focus:border-[#3B82F6] cursor-pointer">
             <option value="all">{t.allCoops}</option>
-            <option value="tani">Tani Makmur</option>
-            <option value="suka">Suka Maju</option>
+            <option value="sumber">Sumber Makmur</option>
+            <option value="padiwangi">Padiwangi</option>
           </select>
           <button
             onClick={() => alert('Launching overall stock compliance audit...')}
@@ -101,7 +158,13 @@ export default function StokInventarisScreen({ lang }: StokInventarisScreenProps
             </p>
 
             <div className="space-y-3.5">
-              {stockList.filter(item => item.status === 'KRITIS').map(item => (
+              {stockList.filter(item => {
+                if (user && user.role === 'cooperative_admin') {
+                  const coopName = user.cooperative || '';
+                  return (item.cooperative.toLowerCase().includes(coopName.toLowerCase()) || coopName.toLowerCase().includes(item.cooperative.toLowerCase())) && item.stock < 0.3 * item.capacityMax;
+                }
+                return item.stock < 0.3 * item.capacityMax;
+              }).map(item => (
                 <div key={item.id} className="p-3.5 rounded-xl border border-rose-100 bg-rose-50/50 flex justify-between items-center">
                   <div>
                     <h4 className="font-extrabold text-xs text-[#0b1c30]">{item.name}</h4>
@@ -155,29 +218,35 @@ export default function StokInventarisScreen({ lang }: StokInventarisScreenProps
                 {/* Yard 1 */}
                 <div>
                   <div className="flex justify-between text-xs mb-1 font-semibold text-slate-700">
-                    <span>Gudang Utama Tani Makmur</span>
-                    <span className="font-bold text-[#0b1c30]">450 / 2,000 Ton (22.5%)</span>
+                    <span>Gudang Utama Sumber Makmur</span>
+                    <span className="font-bold text-[#0b1c30]">
+                      {smStock.toLocaleString('en-US')} / {smCap.toLocaleString('en-US')} Ton ({smPctStr}%)
+                    </span>
                   </div>
                   <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-rose-500 rounded-full" style={{ width: '22.5%' }}></div>
+                    <div className="h-full bg-rose-500 rounded-full transition-all duration-500" style={{ width: `${smPct}%` }}></div>
                   </div>
                 </div>
 
                 {/* Yard 2 */}
                 <div>
                   <div className="flex justify-between text-xs mb-1 font-semibold text-slate-700">
-                    <span>Gudang Utama Suka Maju</span>
-                    <span className="font-bold text-[#0b1c30]">2,400 / 3,000 Ton (80%)</span>
+                    <span>Gudang Utama Padiwangi</span>
+                    <span className="font-bold text-[#0b1c30]">
+                      {pwStock.toLocaleString('en-US')} / {pwCap.toLocaleString('en-US')} Ton ({pwPctStr}%)
+                    </span>
                   </div>
                   <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-[#3B82F6] rounded-full" style={{ width: '80%' }}></div>
+                    <div className="h-full bg-[#3B82F6] rounded-full transition-all duration-500" style={{ width: `${pwPct}%` }}></div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <p className="text-[10px] text-gray-400 mt-5 font-semibold uppercase font-mono">
-              Status: SAFE STORAGE LIMIT
+            <p className={`text-[10px] font-semibold uppercase font-mono mt-5 ${
+              (smPct > 90 || pwPct > 90) ? 'text-rose-600 font-bold animate-pulse' : 'text-gray-400'
+            }`}>
+              Status: {(smPct > 90 || pwPct > 90) ? 'NEAR STORAGE LIMIT' : 'SAFE STORAGE LIMIT'}
             </p>
           </div>
         </div>
@@ -201,7 +270,14 @@ export default function StokInventarisScreen({ lang }: StokInventarisScreenProps
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 text-slate-800">
-              {stockList.map(item => (
+              {stockList.filter(item => {
+                if (user && user.role === 'cooperative_admin') {
+                  const coopName = user.cooperative || '';
+                  return item.cooperative.toLowerCase().includes(coopName.toLowerCase()) || 
+                         coopName.toLowerCase().includes(item.cooperative.toLowerCase());
+                }
+                return true;
+              }).map(item => (
                 <tr className="hover:bg-slate-50/50 transition-colors" key={item.id}>
                   <td className="p-4 flex items-center gap-3">
                     <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center font-bold text-blue-600">
@@ -246,7 +322,19 @@ export default function StokInventarisScreen({ lang }: StokInventarisScreenProps
         </div>
 
         <div className="divide-y divide-gray-100 text-xs">
-          {stockLogs.map(log => (
+          {stockLogs.filter(log => {
+            if (user && user.role === 'cooperative_admin') {
+              const coopName = user.cooperative || '';
+              const descLower = log.description.toLowerCase();
+              if (coopName.toLowerCase().includes('sumber makmur')) {
+                return descLower.includes('budi') || descLower.includes('gudang utama a') || descLower.includes('gudang b') || descLower.includes('sumber makmur') || descLower.includes('audit');
+              }
+              if (coopName.toLowerCase().includes('padiwangi')) {
+                return descLower.includes('andi') || descLower.includes('padiwangi') || descLower.includes('gudang c');
+              }
+            }
+            return true;
+          }).map(log => (
             <div className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 hover:bg-slate-50/40 transition-colors" key={log.id}>
               <div className="flex gap-3">
                 <span className={`material-symbols-outlined p-2 rounded-lg shrink-0 ${
@@ -317,12 +405,23 @@ export default function StokInventarisScreen({ lang }: StokInventarisScreenProps
                   <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400" htmlFor="coop-select">{t.coopColumn}</label>
                   <select
                     id="coop-select"
-                    className="w-full border border-gray-200 rounded-lg p-2.5 bg-white focus:border-[#3B82F6] outline-none font-semibold"
+                    className="w-full border border-gray-200 rounded-lg p-2.5 bg-white focus:border-[#3B82F6] outline-none font-semibold disabled:bg-gray-50 disabled:text-gray-500"
                     value={newCoop}
                     onChange={(e) => setNewCoop(e.target.value)}
+                    disabled={user?.role === 'cooperative_admin'}
                   >
-                    <option value="Tani Makmur">Tani Makmur</option>
-                    <option value="Suka Maju">Suka Maju</option>
+                    {user?.role === 'cooperative_admin' ? (
+                      user.cooperative.toLowerCase().includes('sumber makmur') ? (
+                        <option value="Sumber Makmur">Sumber Makmur</option>
+                      ) : (
+                        <option value="Padiwangi">Padiwangi</option>
+                      )
+                    ) : (
+                      <>
+                        <option value="Sumber Makmur">Sumber Makmur</option>
+                        <option value="Padiwangi">Padiwangi</option>
+                      </>
+                    )}
                   </select>
                 </div>
 

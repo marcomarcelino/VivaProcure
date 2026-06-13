@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+*.zip
+*.rar
+.env
+.env.local
+.env.production
+.env.development
+*.rar
+*.zip
+*.tar.gz
+build
+coverage
