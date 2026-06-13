@@ -469,7 +469,7 @@ export default function OrderTrackingScreen({ lang, orders, onUpdateOrderStatus,
                   <div className="space-y-3">
                     
                     {/* Interactive Simulator Tools */}
-                    {selectedOrder.currentStatus !== 'diterima' && user && (user.role === 'supplier' || user.role === 'super_admin') && (
+                    {selectedOrder.currentStatus !== 'diterima' && user && (user.role === 'supplier' || user.role === 'super_admin' || user.role === 'cooperative_admin') && (
                       <div className="bg-amber-50/50 border border-amber-200/60 rounded-xl p-3.5 space-y-2.5">
                         <span className="text-[9px] text-amber-700 bg-amber-100 font-mono font-black px-2 py-0.5 rounded uppercase tracking-wider block w-fit">
                           {lang === 'id' ? 'Simulasi Perjalanan (Fungsi Demo)' : 'Courier Simulation Controls'}
@@ -513,7 +513,7 @@ export default function OrderTrackingScreen({ lang, orders, onUpdateOrderStatus,
                     )}
 
                     {/* Cooperative Main Receipt verification Trigger */}
-                    {selectedOrder.currentStatus === 'sampai' ? (
+                    {selectedOrder.currentStatus !== 'diterima' ? (
                       user && (user.role === 'cooperative_admin' || user.role === 'super_admin') ? (
                         <button
                           onClick={handleOpenRatingModal}
